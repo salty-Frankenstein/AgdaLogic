@@ -31,6 +31,12 @@ infixl 12 _∪_
 _∪_ : {A : Set} → Collection→ A → Collection→ A → Collection→ A
 a ∪ b = λ x → x ∉ a → ¬ (x ∉ b)
 
+∪-perserve-∈ᵣ : {A : Set} → {r : A} (X Y : Collection→ A) → r ∈ X → r ∈ X ∪ Y
+∪-perserve-∈ᵣ X Y x x₁ x₂ = x₁ x
+
+∪-perserve-∈ₗ : {A : Set} → {r : A} (X Y : Collection→ A) → r ∈ X → r ∈ Y ∪ X
+∪-perserve-∈ₗ X Y x x₁ x₂ = x₂ x
+
 -- some notations
 ⟪_,_⟫ : {A : Set} → A → A → Collection→ A
 ⟪ a , b ⟫ = ⟪ a ⟫ ∪ ⟪ b ⟫ 
