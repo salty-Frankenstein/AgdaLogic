@@ -2,15 +2,16 @@ module ND where
 open import Data.Empty using (⊥; ⊥-elim)
 import Relation.Binary.PropositionalEquality as Eq
 open Eq using (_≡_; _≢_; refl; trans; cong; sym; subst; inspect; [_]; cong₂)
-open import Data.Sum using (_⊎_; inj₁; inj₂)
-open import Data.Product using (_×_; proj₁; proj₂; Σ; ∃; Σ-syntax; ∃-syntax) renaming (_,_ to ⟨_,_⟩)
+open import Data.Sum using (_⊎_; inj₁; inj₂; map)
+open import Data.Product using (_×_; proj₁; proj₂; Σ; ∃; Σ-syntax; ∃-syntax; map-Σ) renaming (_,_ to ⟨_,_⟩)
 open import Relation.Nullary using (¬_; Dec; yes; no)
 open import Data.String using (String; _≟_)
 open import Data.Bool using (Bool; true; false; _∧_; _∨_; not; T)
-open import Data.Bool.Properties using (T-≡; T-∨)
-open import Function.Bundles using (Func)
+open import Data.Bool.Properties using (T-≡; T-∨; T-∧; ∨-zeroʳ; not-¬; not-injective)
+open import Function.Bundles using (Func; _⇔_)
 open import Function.Base using (_∘_)
 open import Function.Properties.Equivalence using (⇔⇒⟶; ⇔⇒⟵)
+open import Level
 open import Collection
 
 infixl 17 _∧'_
@@ -224,6 +225,11 @@ data ⊢ⁿ_ : Formula → Set₁ where
 ex3' : ⊢ⁿ (φ →' ψ →' σ) →' φ ∧' ψ →' σ
 ex3' = proof ex3
 
+⇔⇒→ : ∀ {a b} → _⇔_ {0ℓ} {0ℓ} a b → a → b
+⇔⇒→ = Func.to ∘ ⇔⇒⟶
+⇔⇒← : ∀ {a b} → _⇔_ {0ℓ} {0ℓ} a b → b → a
+⇔⇒← = Func.to ∘ ⇔⇒⟵
+
 -- semantical consequence
 infix 10 _⊨_
 data _⊨_ : Context → Formula → Set₁ where
@@ -237,36 +243,50 @@ data _⊨_ : Context → Formula → Set₁ where
 ...                          | no k    = x {r} (λ x₄ → x₄ k x₂)
 ...                          | yes k   = subst (λ x → ⟦ x ⟧ v ≡ true) (sym k) x₁
 
+×→∧' : ∀ a b → a ≡ true × b ≡ true → a ∧ b ≡ true
+×→∧' _ _ ⟨ x , x₁ ⟩ = ⇔⇒→ T-≡ (⇔⇒← T-∧ ⟨ ⇔⇒← T-≡ x , ⇔⇒← T-≡ x₁ ⟩)
+∧'→× : ∀ a b → a ∧ b ≡ true → a ≡ true × b ≡ true
+∧'→× _ _ x using k <- ⇔⇒→ T-∧ (⇔⇒← T-≡ x) = ⟨ ⇔⇒→ T-≡ (proj₁ k) , ⇔⇒→ T-≡ (proj₂ k) ⟩
+∨'→⊎ : ∀ a b → a ∨ b ≡ true → a ≡ true ⊎ b ≡ true
+∨'→⊎ _ _ t = map (⇔⇒→ T-≡) (⇔⇒→ T-≡) (⇔⇒→ T-∨ (⇔⇒← T-≡ t))
+⊎→∨' : ∀ a b → a ≡ true ⊎ b ≡ true → a ∨ b ≡ true 
+⊎→∨' a b x with x
+... | inj₁ y = cong (_∨ b) ((⇔⇒→ T-≡) (⇔⇒← T-≡ y))
+... | inj₂ y = trans (cong (a ∨_) ((⇔⇒→ T-≡) (⇔⇒← T-≡ y))) (∨-zeroʳ a)
+
 soundness : ∀ {Γ φ} → Γ ⊢ⁿ φ → Γ ⊨ φ
 soundness (form f) = ⊨-intro (λ x → x refl)
-soundness (weaken x x₁) = {!   !}
-soundness (∧I x x₁) = {!   !}
-soundness (∧Eₗ x) = {!   !}
-soundness (∧Eᵣ x) = {!   !}
-soundness (∨Iₗ x) = {!   !}
-soundness (∨Iᵣ x) = {!   !}
+soundness (weaken {Γ} {Δ} {φ} x x₁) with soundness x₁
+...                                    | ⊨-intro k = ⊨-intro (λ x' → k (x' ∘ ⊂-perserve-∈ Γ Δ x))
+soundness (∧I {Γ₁} {Γ₂} {φ} {ψ} x x₁) with soundness x | soundness x₁ 
+...| ⊨-intro k1  | ⊨-intro k2 = ⊨-intro λ {v} x' → ×→∧' (⟦ φ ⟧ v) (⟦ ψ ⟧ v)
+                                                    ⟨ k1 (x' ∘ (∪-perserve-∈ᵣ Γ₁ Γ₂)) 
+                                                    , k2 (x' ∘ (∪-perserve-∈ₗ Γ₂ Γ₁)) ⟩
+soundness (∧Eₗ {Γ} {φ} {ψ} x) with soundness x 
+... | ⊨-intro k = ⊨-intro (λ {v} x' → proj₁ (∧'→× (⟦ φ ⟧ v) (⟦ ψ ⟧ v) (k x')))
+soundness (∧Eᵣ {Γ} {φ} {ψ} x) with soundness x 
+... | ⊨-intro k = ⊨-intro (λ {v} x' → proj₂ (∧'→× (⟦ φ ⟧ v) (⟦ ψ ⟧ v) (k x')))
+soundness (∨Iₗ {Γ} {φ} {ψ} x) with soundness x 
+... | ⊨-intro k = ⊨-intro (λ {v} x' → ⊎→∨' (⟦ φ ⟧ v) (⟦ ψ ⟧ v) (inj₁ (k x')))
+soundness (∨Iᵣ {Γ} {φ} {ψ} x) with soundness x 
+... | ⊨-intro k = ⊨-intro (λ {v} x' → ⊎→∨' (⟦ φ ⟧ v) (⟦ ψ ⟧ v) (inj₂ (k x')))
 soundness (∨E {Γ₁} {Γ₂} {Γ₃} {φ} {ψ} {σ} x x₁ x₂) = ⊨-intro go
   where
-    lemma11 : ∀ {r} → r ∈ Γ₁ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
-    lemma11 = ∪-perserve-∈ᵣ (Γ₁ ∪ (Γ₂ - φ)) (Γ₃ - ψ) ∘ ∪-perserve-∈ᵣ Γ₁ (Γ₂ - φ)
+    lemma1 : ∀ {r} → r ∈ Γ₁ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
+    lemma1 = ∪-perserve-∈ᵣ (Γ₁ ∪ (Γ₂ - φ)) (Γ₃ - ψ) ∘ ∪-perserve-∈ᵣ Γ₁ (Γ₂ - φ)
 
-    lemma12 : ∀ {r} → r ∈ Γ₂ - φ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
-    lemma12 = ∪-perserve-∈ᵣ (Γ₁ ∪ (Γ₂ - φ)) (Γ₃ - ψ) ∘ ∪-perserve-∈ₗ (Γ₂ - φ) Γ₁
+    lemma2 : ∀ {r} → r ∈ Γ₂ - φ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
+    lemma2 = ∪-perserve-∈ᵣ (Γ₁ ∪ (Γ₂ - φ)) (Γ₃ - ψ) ∘ ∪-perserve-∈ₗ (Γ₂ - φ) Γ₁
 
-    lemma13 : ∀ {r} → r ∈ Γ₃ - ψ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
-    lemma13 = ∪-perserve-∈ₗ (Γ₃ - ψ) (Γ₁ ∪ (Γ₂ - φ))
-
-    lemma2 : ∀ v φ ψ → ⟦ φ ∨' ψ ⟧ v ≡ true → ⟦ φ ⟧ v ≡ true ⊎ ⟦ ψ ⟧ v ≡ true
-    lemma2 v φ ψ t with Func.to (⇔⇒⟶ T-∨) (Func.to (⇔⇒⟵ T-≡) t)
-    ...               | inj₁ x = inj₁ (Func.to (⇔⇒⟶ T-≡) x) 
-    ...               | inj₂ y = inj₂ (Func.to (⇔⇒⟶ T-≡) y)
+    lemma3 : ∀ {r} → r ∈ Γ₃ - ψ → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ)
+    lemma3 = ∪-perserve-∈ₗ (Γ₃ - ψ) (Γ₁ ∪ (Γ₂ - φ))
 
     go : {v : Valuation} → ({r : Formula} 
       → r ∈ Γ₁ ∪ (Γ₂ - φ) ∪ (Γ₃ - ψ) → ⟦ r ⟧ v ≡ true) → ⟦ σ ⟧ v ≡ true
     go {v} x' with soundness x | soundness x₁ | soundness x₂
-    ...          | ⊨-intro k1  | ⊨-intro k2   | ⊨-intro k3 with lemma2 v φ ψ (k1 (x' ∘ lemma11)) in eq
-    ...                                                       | inj₁ x = k2 (Γ-φ∪φ (x' ∘ lemma12) x)
-    ...                                                       | inj₂ y = k3 (Γ-φ∪φ (x' ∘ lemma13) y)
+    ...          | ⊨-intro k1  | ⊨-intro k2   | ⊨-intro k3 with ∨'→⊎ (⟦ φ ⟧ v) (⟦ ψ ⟧ v) (k1 (x' ∘ lemma1)) in eq
+    ...                                                       | inj₁ x = k2 (Γ-φ∪φ (x' ∘ lemma2) x)
+    ...                                                       | inj₂ y = k3 (Γ-φ∪φ (x' ∘ lemma3) y)
 soundness (→I {Γ} {φ} {ψ} x) = ⊨-intro go
   where
     go : {v : Valuation} → ({r : Formula} 
@@ -274,12 +294,32 @@ soundness (→I {Γ} {φ} {ψ} x) = ⊨-intro go
     go {v} x' with soundness x | ⟦ φ ⟧ v in eq
     ...          | _           | false           = refl
     ...          | ⊨-intro k   | true            = k (Γ-φ∪φ x' eq) 
-soundness (→E x x₁) = {!   !}
-soundness (¬I x) = {!   !}
-soundness (¬E x x₁) = {!   !}
-soundness {Γ} {φ} (⊥E x) = ⊨-intro go
+soundness (→E {Γ₁} {Γ₂} {φ} {ψ} x x₁) with soundness x | soundness x₁ 
+...                                      | ⊨-intro k1  | ⊨-intro k2 = ⊨-intro go
   where
-    go : {v : Valuation} → ({r : Formula} → r ∈ Γ → ⟦ r ⟧ v ≡ true) → ⟦ φ ⟧ v ≡ true
-    go {v} x' with soundness x 
-    ...          | ⊨-intro k = ⊥-elim (Func.to (⇔⇒⟵ T-≡) (k x'))
-soundness (RAA x) = {!   !}
+    go : {v : Valuation} → ({r : Formula} 
+       → r ∈ Γ₁ ∪ Γ₂ → ⟦ r ⟧ v ≡ true) → ⟦ ψ ⟧ v ≡ true
+    go {v} x' with ∨'→⊎ (not (⟦ φ ⟧ v)) (⟦ ψ ⟧ v) (k1 (x' ∘ ∪-perserve-∈ᵣ Γ₁ Γ₂)) 
+    ... | inj₁ y = ⊥-elim (not-¬ (sym (k2 (x' ∘ ∪-perserve-∈ₗ Γ₂ Γ₁))) (sym y))
+    ... | inj₂ y = y
+soundness (¬I {Γ} {φ} x) with soundness x
+...                         | ⊨-intro k = ⊨-intro go
+  where
+    go : {v : Valuation} → ({r : Formula} → r ∈ Γ - φ → ⟦ r ⟧ v ≡ true) → ⟦ ¬' φ ⟧ v ≡ true
+    go {v} x' with ⟦ φ ⟧ v in eq 
+    ...          | false = refl
+    ...          | true = k (Γ-φ∪φ x' eq)
+soundness (¬E {Γ₁} {Γ₂} {φ} x x₁) with soundness x | soundness x₁
+...                                  | ⊨-intro k1  | ⊨-intro k2 
+    = ⊨-intro λ x' → ⊥-elim (not-¬ (sym (k2 (x' ∘ ∪-perserve-∈ₗ Γ₂ Γ₁))) 
+                                   (sym (k1 (x' ∘ ∪-perserve-∈ᵣ Γ₁ Γ₂))))
+soundness (⊥E {Γ} {φ} x) with soundness x 
+...                         | ⊨-intro k = ⊨-intro λ x' → ⊥-elim ((⇔⇒← T-≡) (k x'))
+soundness (RAA {Γ} {φ} x) with soundness x
+...                          | ⊨-intro k = ⊨-intro go
+  where
+    go : {v : Valuation} → ({r : Formula} 
+      → r ∈ Γ - (¬' φ) → ⟦ r ⟧ v ≡ true) → ⟦ φ ⟧ v ≡ true
+    go {v} x' with ⟦ ¬' φ ⟧ v in eq 
+    ...          | false = not-injective eq
+    ...          | true  = ⊥-elim (not-¬ (k (Γ-φ∪φ x' eq)) refl)
